@@ -28,7 +28,7 @@ MCU = atmega128
 FORMAT = ihex
 
 # Target file name (without extension).
-TARGET = minitest
+TARGET = avrpora
 
 # Object files directory
 OBJDIR = obj
