@@ -27,6 +27,17 @@
 #define START_INTERVAL (((uint32_t)6000)<<(INTERVAL_SCALE))
 
 
+// 1989 mils = 4000 x steps
+// 1996 mils = 4000 y steps
+
+
+#define MAX_X 12000
+#define MAX_Y 14000
+#define MAX_Z 10000
+
+volatile int16_t cur_x, cur_y, cur_z;
+volatile uint8_t cur_x_dir, cur_y_dir, cur_z_dir;
+
 volatile uint32_t x_steps_left;
 volatile uint32_t y_steps_left;
 
@@ -63,8 +74,23 @@ volatile uint16_t y_dec_left;
 #define Z_LED_OFF() sbi(PORTG, 1)
 
 
-volatile uint8_t move_z = 0;
-volatile uint8_t move_z_slowly = 0;
+void x_dir(uint8_t pos)
+{
+	cur_x_dir = pos;
+	if(pos) X_DIR_POS(); else X_DIR_NEG();
+}
+
+void y_dir(uint8_t pos)
+{
+	cur_y_dir = pos;
+	if(pos) Y_DIR_POS(); else Y_DIR_NEG();
+}
+
+void z_dir(uint8_t pos)
+{
+	cur_z_dir = pos;
+	if(pos) Z_DIR_POS(); else Z_DIR_NEG();
+}
 
 
 ISR(TIMER1_COMPA_vect) // X
@@ -99,39 +125,30 @@ ISR(TIMER1_COMPA_vect) // X
 
 ISR(TIMER3_COMPA_vect) // Y
 {
-	if(move_z)
-		Z_PULSE_ON();
-	else
-		Y_PULSE_ON();
+	Y_PULSE_ON();
 
 	y_steps_left--;
 
-	if(!move_z_slowly)
-	{
-		if(y_steps_left < y_dec_left)
-		{  // Brake
-			y_cur_interval += y_cur_interval >> ((move_z?1:0)+ACC_STEP_SIZE);
-			OCR3A = y_cur_interval>>INTERVAL_SCALE;
-			// y_dec_left-- not needed.
-		}
-		else if(y_acc_left)
-		{  // Accelerate
-			y_cur_interval -= y_cur_interval >> ((move_z?1:0)+ACC_STEP_SIZE);
-			OCR3A = y_cur_interval>>INTERVAL_SCALE;
-			y_acc_left--;
-		}
-		// else go full speed.
+	if(y_steps_left < y_dec_left)
+	{  // Brake
+		y_cur_interval += y_cur_interval >> ACC_STEP_SIZE;
+		OCR3A = y_cur_interval>>INTERVAL_SCALE;
+		// y_dec_left-- not needed.
 	}
+	else if(y_acc_left)
+	{  // Accelerate
+		y_cur_interval -= y_cur_interval >> ACC_STEP_SIZE;
+		OCR3A = y_cur_interval>>INTERVAL_SCALE;
+		y_acc_left--;
+	}
+	// else go full speed.
 
 	if(y_steps_left == 0)
 	{
 		cbi(ETIMSK, 4);
 	}
 
-	if(move_z)
-		Z_PULSE_OFF();
-	else
-		Y_PULSE_OFF();
+	Y_PULSE_OFF();
 }
 
 void wait_step()
@@ -145,21 +162,27 @@ void step_x_1()
 	X_PULSE_ON();
 	_delay_us(5);
 	X_PULSE_OFF();
+
+	cur_x += cur_x_dir?1:-1;
 }
 
 void step_y_1()
 {
-	if(move_z)
-		Z_PULSE_ON();
-	else
-		Y_PULSE_ON();
+	Y_PULSE_ON();
 	_delay_us(5);
-	if(move_z)
-		Z_PULSE_OFF();
-	else
-		Y_PULSE_OFF();
+	Y_PULSE_OFF();
+
+	cur_y += cur_y_dir?1:-1;
 }
 
+void step_z_1()
+{
+	Z_PULSE_ON();
+	_delay_us(5);
+	Z_PULSE_OFF();
+
+	cur_z += cur_z_dir?1:-1;
+}
 
 void start_stepping(uint32_t steps_x, uint32_t steps_y)
 {
@@ -206,13 +229,65 @@ void start_stepping(uint32_t steps_x, uint32_t steps_y)
 
 }
 
-void start_z(uint32_t steps)
+void move_xy(int16_t x_mils, int16_t y_mils)
 {
-	uint8_t tmp = move_z;
-	move_z = 1;
-	start_stepping(0, steps);
-	wait_step();
-	move_z = tmp;
+	int32_t x_tmp, y_tmp;
+
+	x_tmp = x_mils;
+	x_tmp *= 40000;
+	x_tmp /= 19890;
+
+	y_tmp = y_mils;
+	y_tmp *= 40000;
+	y_tmp /= 19960;
+
+
+	if(x_tmp < 0) { x_tmp *= -1; x_dir(0);} else x_dir(1);
+	if(y_tmp < 0) { y_tmp *= -1; y_dir(0);} else y_dir(1);
+
+	start_stepping(x_tmp, y_tmp);
+}
+
+
+#define Z_ACC_STEPS 60
+
+void step_z(uint16_t steps, uint8_t down, uint8_t interval)
+{
+	uint16_t acc_steps, dec_steps;
+
+	if(interval < Z_ACC_STEPS+10)
+		interval = Z_ACC_STEPS+10;
+	if(interval > 250)
+		interval = 250;
+
+	if(down) Z_DIR_NEG(); else Z_DIR_POS();
+
+	if(steps < Z_ACC_STEPS*2)
+	{
+		acc_steps = steps>>1;
+		dec_steps = steps - acc_steps;
+	}
+	else
+	{
+		acc_steps = Z_ACC_STEPS;
+		dec_steps = Z_ACC_STEPS;
+	}
+
+	while(steps--)
+	{
+		uint8_t interval_tmp;
+		step_z_1();
+		if(steps < dec_steps)
+			interval++;
+		else if(acc_steps)
+		{
+			interval--;
+			acc_steps--;
+		}
+
+		interval_tmp = interval;
+		while(interval_tmp--) _delay_us(15);
+	}
 }
 
 
@@ -228,7 +303,7 @@ void start_z(uint32_t steps)
 #define XHOME() BUT(PINC, 1)
 #define YHOME() BUT(PINC, 0)
 #define ZHOME() BUT(PINE, 3)
-
+#define GOTOBUT() BUT(PINC, 5)
 
 void find_home_xy()
 {
@@ -271,40 +346,50 @@ void find_home_xy()
 		_delay_us(4000);
 	}
 
-
+	cur_x = 0;
+	cur_y = 0;
 }
 
 void find_home_z()
 {
-	uint8_t tmp = move_z;
-	move_z = 1;
-	Z_DIR_POS();
-	while(!ZHOME())
+	if(ZHOME())
 	{
-		step_y_1();
-		_delay_us(700);
+		Z_DIR_NEG();
+		while(ZHOME())
+		{
+			step_z_1();
+			_delay_us(800);
+		}
+		step_z(200, 1, 100);
+		_delay_ms(50);
 	}
 
-	_delay_ms(10);
-	Z_DIR_NEG();
-	move_z_slowly = 1;
-	start_z(1500);
-	wait_step();
-	_delay_ms(10);
+	Z_DIR_POS();
+	while(!ZHOME())
+	{
+		step_z_1();
+		_delay_us(800);
+	}
+
+	_delay_ms(50);
+	step_z(200, 1, 100);
+	_delay_ms(50);
 
 	Z_DIR_POS();
 
 	while(!ZHOME())
 	{
-		step_y_1();
+		step_z_1();
 		_delay_us(5000);
 	}
 
-	move_z = tmp;
+	cur_z = 200;
+
 }
 
 int main()
 {
+	uint8_t move_z = 0;
 	TCCR1A = 0;
 	TCCR3A = 0;
 
@@ -332,33 +417,62 @@ int main()
 
 	while(1)
 	{
+		if(KESKI() && GOTOBUT())
+		{
+			find_home_xy();
+			find_home_z();
+		}
+
 		if(XNEG() && !move_z)
 		{
-			X_DIR_NEG();
-			step_x_1();
+			if(cur_x > 0)
+			{
+				x_dir(0);
+				step_x_1();
+			}
 		}
 		else if(XPOS() && !move_z)
 		{
-			X_DIR_POS();
-			step_x_1();
+			if(cur_x < MAX_X)
+			{
+				x_dir(1);
+				step_x_1();
+			}
 		}
 
 		if(YNEG())
 		{
 			if(move_z)
-				Z_DIR_NEG();
-			else
-				Y_DIR_NEG();
-
-			step_y_1();
+			{
+				if(cur_z > 0)
+				{
+					z_dir(0);
+					step_z_1();
+					cur_z--;
+				}
+			}
+			else if(cur_y > 0)
+			{
+				y_dir(0);
+				step_y_1();
+			}
 		}
 		else if(YPOS())
 		{
 			if(move_z)
-				Z_DIR_POS();
-			else
-				Y_DIR_POS();
-			step_y_1();
+			{
+				if(cur_z < MAX_Z)
+				{
+					z_dir(1);
+					step_z_1();
+					cur_z++;
+				}
+			}
+			else if(cur_y < MAX_Y)
+			{
+				y_dir(1);
+				step_y_1();
+			}
 		}
 
 		if(ZBUT())
@@ -380,16 +494,10 @@ int main()
 
 		if(TEACH())
 		{
-			Z_DIR_NEG();
-			move_z_slowly=1;
-			start_z(1000);
-			_delay_ms(50);
-			Z_DIR_POS();
-			move_z_slowly=0;
-			start_z(1000);
+			step_z(1000, 1, 130);
 			_delay_ms(100);
+			step_z(1000, 0, 80);
 		}
-
 
 		if(KESKI())
 			_delay_us(600);
