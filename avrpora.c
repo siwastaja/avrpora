@@ -387,6 +387,78 @@ void find_home_z()
 
 }
 
+#define RX_BUF_SIZE 32
+char rx_buf[RX_BUF_SIZE];
+uint8_t rx_point;
+
+char* comp_str(char* str1, char* str2)
+{
+	while(*str2 != 0)
+	{
+		if(*str1 != *str2)
+			return 0;
+		str1++;
+		str2++;
+	}
+	return str1;
+}
+
+char* find_c(char* str, char c)
+{
+	while(1)
+	{
+		if(*str == 0)
+			return 0;
+		else if(*str == c)
+			return str;
+		str++;
+	}
+}
+
+ISR(USART_RXC_vect)
+{
+	char byte = UDR;
+	if(byte == ';')
+	{
+		// rx_point holds the last position.
+		rx_buf[rx_point] = 0;
+		char* p_val;
+		if((p_val = comp_str(rx_buf, "MA")))
+		{
+			int16_t x = atoi(p_val);
+			if(p_val = find_c(p_val, ','))
+			{
+				int16_t y = atoi(p_val);
+				if(x < 0 || x > 12000 || y < 0 || y > 12000)
+				{
+					
+				}
+			}
+			if(new_setpoint < -100 || new_setpoint > 200)
+			{
+				print_string("\r\nSET CMD OUT OF RANGE\r\n");
+			}
+			else
+			{
+				temp_setpoint = K_AT_0C+new_setpoint*10;
+			}
+		}
+		else if(comp_str(rx_buf, "MR"))
+		{
+		}
+		rx_point = 0;
+	}
+	else
+	{
+		if(byte >= 'a' && byte <= 'z')
+			byte = byte - 'a' + 'A';
+		rx_buf[rx_point] = byte;
+		rx_point++;
+		if(rx_point >= RX_BUF_SIZE)
+			rx_point = 0;
+	}
+}
+
 int main()
 {
 	uint8_t move_z = 0;
