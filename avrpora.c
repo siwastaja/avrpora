@@ -387,27 +387,33 @@ void step_z(int16_t steps, uint8_t down, uint8_t interval)
 
 void find_home_xy()
 {
-
+	uint8_t started_at_home = 0;
+	if(!YHOME() || !XHOME()) started_at_home = 1;
 	X_DIR_NEG();
 	Y_DIR_NEG();
 
 	while(YHOME())
 	{
 		step_y_1();
-		_delay_us(500);
+		_delay_us(300);
 	}
+	_delay_us(150);	step_y_1(); _delay_us(600); step_y_1();
 
 	while(XHOME())
 	{
 		step_x_1();
-		_delay_us(500);
+		_delay_us(300);
 	}
+	_delay_us(150);	step_x_1(); _delay_us(600); step_x_1();
 
 	_delay_ms(10);
 
 	X_DIR_POS();
 	Y_DIR_POS();
-	start_stepping(400, 400);
+	if(started_at_home)
+		start_stepping(400, 400);
+	else
+		start_stepping(120, 120);
 	wait_step();
 	_delay_ms(10);
 
@@ -778,9 +784,9 @@ int main()
 		if(nap_pained)
 		{
 			if(KESKI())
-				_delay_us(600);
+				_delay_us(500);
 			else
-				_delay_us(3000);
+				_delay_us(4000);
 		}
 
 		if(next_op == OP_MA)
