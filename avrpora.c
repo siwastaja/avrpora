@@ -139,7 +139,6 @@ ISR(TIMER1_COMPA_vect) // X
 
 }
 
-
 ISR(TIMER3_COMPA_vect) // Y
 {
 	Y_PULSE_ON();
@@ -168,9 +167,11 @@ ISR(TIMER3_COMPA_vect) // Y
 	Y_PULSE_OFF();
 }
 
+
+
 void wait_step()
 {
-	while(x_steps_left || y_steps_left) ;
+	while((TIMSK & (1<<4)) || (ETIMSK & (1<<4))) ;
 }
 
 uint8_t in_pause;
@@ -178,7 +179,7 @@ uint8_t in_pause;
 void wait_step_pause()
 {
 	uint8_t i;
-	while(x_steps_left || y_steps_left)
+	while((TIMSK & (1<<4)) || (ETIMSK & (1<<4)))
 	{
 		if(!in_pause && PAUSEBUT() && PAUSEBUT())
 		{
